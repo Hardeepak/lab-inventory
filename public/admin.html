@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="nav-bar">
+        <h1>Admin Dashboard</h1>
+        <button id="logout-btn" class="admin-btn" style="display: none;">Logout</button>
+        <button class="admin-btn" onclick="window.location.href='index.html'">Back to Site</button>
+    </div>
+
+    <div id="login-section" class="container" style="display: block; max-width: 400px;">
+        <div class="card">
+            <h2>Admin Login</h2>
+            <form id="login-form">
+                <input type="email" id="adminEmail" placeholder="Admin Email" required>
+                <input type="password" id="adminPassword" placeholder="Password" required>
+                <button type="submit">Log In</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="dashboard-section" class="container" style="display: none;">
+        <div>
+            <div class="card" style="margin-bottom: 20px;">
+                <h2>Edit Lab Info</h2>
+                <form id="lab-info-form">
+                    <input type="text" id="labLocation" placeholder="Lab Location">
+                    <input type="text" id="lecturerName" placeholder="In-Charge Lecturer Name">
+                    <input type="text" id="taName" placeholder="Teaching Assistant Name">
+                    <input type="text" id="taPhone" placeholder="Teaching Assistant Phone">
+                    <button type="submit">Save Lab Info</button>
+                </form>
+            </div>
+            
+            <div class="card" style="margin-bottom: 20px;">
+                <h2>Add New Inventory Item</h2>
+                <form id="add-inventory-form">
+                    <input type="text" id="newItemName" placeholder="Item Name" required>
+                    <input type="number" id="newItemQty" placeholder="Total Quantity" min="1" required>
+                    <button type="submit">Add Item</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>Manage Inventory List</h2>
+                <table style="font-size: 14px;">
+                    <thead>
+                        <tr>
+                            <th>Item Name</th>
+                            <th>Total Qty</th>
+                            <th>Avail</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="admin-inventory-table"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h2 id="bookings-title" style="border:none; margin:0; padding:0;">Active Bookings</h2>
+                <button id="toggle-returned-btn" style="width: auto; padding: 8px 15px; font-size: 12px; margin: 0; background-color: #e2e8f0; color: #0f172a;">View Returned Records</button>
+            </div>
+            
+            <div style="overflow-x: auto;">
+                <table style="min-width: 700px;">
+                    <thead>
+                        <tr>
+                            <th>Student & Items</th>
+                            <th>Status Control</th>
+                            <th>Logistics (Date & Note)</th>
+                            <th>Return Info</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="admin-bookings-table"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-auth.js";
+        import { collection, doc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore.js";
+        import { auth, db } from "./firebase-config.js";
+
+        const loginSection = document.getElementById('login-section');
+        const dashboardSection = document.getElementById('dashboard-section');
+        const logoutBtn = document.getElementById('logout-btn');
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                loginSection.style.display = 'none';
+                dashboardSection.style.display = 'grid';
+                logoutBtn.style.display = 'block';
+                loadAdminBookings();
+                loadAdminInventory();
+            } else {
+                loginSection.style.display = 'block';
+                dashboardSection.style.display = 'none';
+                logoutBtn.style.display = 'none';
+            }
+        });
+
+        document.getElementById('login-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            signInWithEmailAndPassword(auth, document.getElementById('adminEmail').value, document.getElementById('adminPassword').value);
+        });
+        logoutBtn.addEventListener('click', () => signOut(auth));
+
+        document.getElementById('lab-info-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await setDoc(doc(db, "settings", "lab_info"), {
+                labLocation: document.getElementById('labLocation').value, lecturerName: document.getElementById('lecturerName').value,
+                taName: document.getElementById('taName').value, taPhone: document.getElementById('taPhone').value
+            }, { merge: true });
+            alert("Lab Info Saved!");
+        });
+
+        document.getElementById('add-inventory-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const qty = parseInt(document.getElementById('newItemQty').value);
+            await addDoc(collection(db, "inventory"), { itemName: document.getElementById('newItemName').value, totalQuantity: qty, availableQuantity: qty });
+            e.target.reset();
+        });
+
+        let adminInventory = [];
+        function loadAdminInventory() {
+            onSnapshot(collection(db, "inventory"), (snapshot) => {
+                adminInventory = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                const table = document.getElementById('admin-inventory-table');
+                table.innerHTML = '';
+                adminInventory.forEach(item => {
+                    table.innerHTML += `
+                        <tr>
+                            <td><input type="text" id="edit-name-${item.id}" value="${item.itemName}" style="margin:0; padding:5px; width:100px;"></td>
+                            <td><input type="number" id="edit-qty-${item.id}" value="${item.totalQuantity}" style="margin:0; padding:5px; width:50px;"></td>
+                            <td>${item.availableQuantity}</td>
+                            <td>
+                                <button onclick="updateItem('${item.id}')" style="padding:5px; font-size:12px; margin-bottom:5px;">Update</button>
+                                <button onclick="deleteItem('${item.id}')" style="padding:5px; font-size:12px; background-color:#ef4444;">Delete</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            });
+        }
+
+        window.updateItem = async function(id) {
+            const newName = document.getElementById(`edit-name-${id}`).value;
+            const newTotal = parseInt(document.getElementById(`edit-qty-${id}`).value);
+            const item = adminInventory.find(i => i.id === id);
+            const diff = newTotal - item.totalQuantity;
+            const newAvailable = item.availableQuantity + diff;
+
+            if (newAvailable < 0) return alert("Cannot reduce total quantity below the amount currently borrowed.");
+
+            await updateDoc(doc(db, "inventory", id), { itemName: newName, totalQuantity: newTotal, availableQuantity: newAvailable });
+            alert("Item updated!");
+        };
+
+        window.deleteItem = async function(id) {
+            if(confirm("Are you sure you want to permanently delete this item?")) {
+                await deleteDoc(doc(db, "inventory", id));
+            }
+        };
+
+        let bookingData = [];
+        let showingReturned = false;
+
+        document.getElementById('toggle-returned-btn').addEventListener('click', (e) => {
+            showingReturned = !showingReturned;
+            document.getElementById('bookings-title').innerText = showingReturned ? "Returned Records" : "Active Bookings";
+            e.target.innerText = showingReturned ? "Back to Active Bookings" : "View Returned Records";
+            renderBookingsTable();
+        });
+
+        function loadAdminBookings() {
+            onSnapshot(collection(db, "bookings"), (snapshot) => {
+                bookingData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                bookingData.sort((a, b) => new Date(b.requestDate) - new Date(a.requestDate));
+                renderBookingsTable();
+            });
+        }
+
+        function renderBookingsTable() {
+            const table = document.getElementById('admin-bookings-table');
+            table.innerHTML = '';
+            
+            const filteredData = bookingData.filter(b => showingReturned ? b.status === "Returned" : b.status !== "Returned");
+
+            if(filteredData.length === 0) {
+                table.innerHTML = `<tr><td colspan="5" style="text-align:center;">No records found.</td></tr>`;
+                return;
+            }
+
+            filteredData.forEach((b) => {
+                let itemsList = b.items.map(i => `${i.itemName} (x${i.qty})`).join("<br>");
+                table.innerHTML += `
+                    <tr>
+                        <td><strong>${b.studentName}</strong><br><small>${itemsList}</small></td>
+                        <td>
+                            <select id="status-${b.id}" style="margin-bottom:5px; width: 100%; box-sizing: border-box;">
+                                <option value="Pending" ${b.status==='Pending'?'selected':''}>Pending</option>
+                                <option value="Approved" ${b.status==='Approved'?'selected':''}>Approved</option>
+                                <option value="Rejected" ${b.status==='Rejected'?'selected':''}>Rejected</option>
+                                <option value="Ready for Collection" ${b.status==='Ready for Collection'?'selected':''}>Ready</option>
+                                <option value="Collected" ${b.status==='Collected'?'selected':''}>Collected</option>
+                                <option value="Returned" ${b.status==='Returned'?'selected':''}>Returned</option>
+                            </select>
+                        </td>
+                        <td>
+                            <input type="text" id="colDate-${b.id}" placeholder="Collect Date/Time" value="${b.collectionDate || ''}" style="margin-bottom:5px; padding:5px; font-size:12px; width: 100%; box-sizing: border-box;">
+                            <input type="text" id="remarks-${b.id}" placeholder="Remarks" value="${b.remarks || ''}" style="margin-bottom:0; padding:5px; font-size:12px; width: 100%; box-sizing: border-box;">
+                        </td>
+                        <td>
+                            <input type="date" id="retDate-${b.id}" value="${b.returnDate || ''}" style="margin-bottom:5px; padding:5px; font-size:12px; width: 100%; box-sizing: border-box;">
+                            <select id="condition-${b.id}" style="margin-bottom:0; padding:5px; font-size:12px; width: 100%; box-sizing: border-box;">
+                                <option value="" disabled ${!b.condition ? 'selected' : ''}>Condition...</option>
+                                <option value="Safe" ${b.condition==='Safe'?'selected':''}>Safe</option>
+                                <option value="Damaged" ${b.condition==='Damaged'?'selected':''}>Damaged</option>
+                                <option value="Broken" ${b.condition==='Broken'?'selected':''}>Broken</option>
+                                <option value="Not Usable" ${b.condition==='Not Usable'?'selected':''}>Not Usable</option>
+                            </select>
+                        </td>
+                        <td>
+                            <button onclick="saveBookingUpdates('${b.id}')" style="font-size:12px; padding:8px; width: 100%; margin-bottom: 5px;">Save</button>
+                            <button onclick="deleteBooking('${b.id}')" style="font-size:12px; padding:8px; width: 100%; background-color: #ef4444;">Delete</button>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+
+        window.saveBookingUpdates = async function(bookingId) {
+            const newStatus = document.getElementById(`status-${bookingId}`).value;
+            const collectionDate = document.getElementById(`colDate-${bookingId}`).value;
+            const remarks = document.getElementById(`remarks-${bookingId}`).value;
+            const returnDate = document.getElementById(`retDate-${bookingId}`).value;
+            const condition = document.getElementById(`condition-${bookingId}`).value;
+            
+            const booking = bookingData.find(b => b.id === bookingId);
+            const oldStatus = booking.status;
+
+            const activeStates = ["Approved", "Ready for Collection", "Collected"];
+            const isNowActive = activeStates.includes(newStatus);
+            const wasActive = activeStates.includes(oldStatus);
+
+            try {
+                if (isNowActive && !wasActive) {
+                    for (let item of booking.items) {
+                        const invRef = doc(db, "inventory", item.id);
+                        const invSnap = await getDoc(invRef);
+                        if (invSnap.exists()) await updateDoc(invRef, { availableQuantity: invSnap.data().availableQuantity - item.qty });
+                    }
+                } else if (!isNowActive && wasActive) {
+                    for (let item of booking.items) {
+                        const invRef = doc(db, "inventory", item.id);
+                        const invSnap = await getDoc(invRef);
+                        if (invSnap.exists()) await updateDoc(invRef, { availableQuantity: invSnap.data().availableQuantity + item.qty });
+                    }
+                }
+
+                await updateDoc(doc(db, "bookings", bookingId), { 
+                    status: newStatus, 
+                    collectionDate: collectionDate, 
+                    remarks: remarks,
+                    returnDate: returnDate,
+                    condition: condition 
+                });
+                alert("Booking updated and inventory synchronized.");
+            } catch (error) { alert("Error updating record: " + error.message); }
+        };
+
+        window.deleteBooking = async function(bookingId) {
+            if(confirm("Are you sure you want to permanently delete this booking record?")) {
+                const booking = bookingData.find(b => b.id === bookingId);
+                const activeStates = ["Approved", "Ready for Collection", "Collected"];
+                
+                try {
+                    // Safety check: Restore inventory if deleting an active booking
+                    if (activeStates.includes(booking.status)) {
+                        for (let item of booking.items) {
+                            const invRef = doc(db, "inventory", item.id);
+                            const invSnap = await getDoc(invRef);
+                            if (invSnap.exists()) {
+                                await updateDoc(invRef, { availableQuantity: invSnap.data().availableQuantity + item.qty });
+                            }
+                        }
+                    }
+                    await deleteDoc(doc(db, "bookings", bookingId));
+                    alert("Record deleted successfully.");
+                } catch (error) {
+                    alert("Error deleting record: " + error.message);
+                }
+            }
+        };
+    </script>
+</body>
+</html>

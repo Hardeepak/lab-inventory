@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lab Inventory Booking</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="nav-bar">
+        <h1>Lab Inventory System</h1>
+        <button class="admin-btn" onclick="window.location.href='admin.html'">Admin Login</button>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h2>Lab & Personnel Info</h2>
+            <div id="lab-info-content">Loading...</div>
+        </div>
+
+        <div class="right-column">
+            <div class="card">
+                <h2>Available Inventory</h2>
+                <input type="text" id="search-inventory" class="search-bar" placeholder="Search items...">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Item</th>
+                            <th>Available</th>
+                            <th>Select Qty</th>
+                        </tr>
+                    </thead>
+                    <tbody id="inventory-table">
+                        <tr><td colspan="3">Loading inventory...</td></tr>
+                    </tbody>
+                </table>
+                <button id="open-modal-btn">Request Booking</button>
+            </div>
+
+            <div class="card">
+                <h2>Booking Records</h2>
+                <input type="text" id="search-bookings" class="search-bar" placeholder="Search your name...">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Student</th>
+                            <th>Items</th>
+                            <th>Date</th>
+                            <th>Status & Details</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bookings-table">
+                        <tr><td colspan="4">Loading records...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Booking Modal -->
+    <div id="booking-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 style="margin:0; border:none; padding:0;">Complete Booking</h2>
+                <button class="close-btn" id="close-modal-btn">&times;</button>
+            </div>
+            <div class="cart-summary" id="cart-summary-display"></div>
+            
+            <form id="booking-form">
+                <input type="text" id="studentName" placeholder="Full Name" required>
+                <input type="text" id="matricNumber" placeholder="Matric Number" required>
+                <input type="text" id="phone" placeholder="Phone Number" required>
+                <input type="date" id="borrowDate" required>
+                <input type="text" id="course" placeholder="For Which Course" required>
+                <input type="text" id="lecturer" placeholder="Course Lecturer Name" required>
+                <button type="submit">Confirm Submission</button>
+            </form>
+        </div>
+    </div>
+
+    <script type="module">
+        import { collection, doc, getDoc, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore.js";
+        import { db } from "./firebase-config.js";
+
+        let inventoryList = [];
+        let cart = {}; 
+
+        async function loadLabInfo() {
+            const docSnap = await getDoc(doc(db, "settings", "lab_info"));
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                document.getElementById('lab-info-content').innerHTML = `
+                    <p><strong>Location:</strong><br>${data.labLocation || 'Not set'}</p>
+                    <p><strong>In-Charge Lecturer:</strong><br>${data.lecturerName || 'Not set'}</p>
+                    <p><strong>Teaching Assistant:</strong><br>${data.taName || 'Not set'}<br>${data.taPhone || 'Not set'}</p>
+                `;
+            }
+        }
+
+        function loadInventory() {
+            onSnapshot(collection(db, "inventory"), (snapshot) => {
+                inventoryList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                renderInventory();
+            });
+        }
+
+        function renderInventory() {
+            const table = document.getElementById('inventory-table');
+            const search = document.getElementById('search-inventory').value.toLowerCase();
+            table.innerHTML = '';
+            
+            inventoryList.filter(item => item.itemName.toLowerCase().includes(search)).forEach(item => {
+                const currentQty = cart[item.id] ? cart[item.id].qty : 0;
+                table.innerHTML += `
+                    <tr>
+                        <td>${item.itemName}</td>
+                        <td>${item.availableQuantity} / ${item.totalQuantity}</td>
+                        <td>
+                            <div class="qty-controls">
+                                <button class="qty-btn" onclick="updateCart('${item.id}', '${item.itemName}', -1, ${item.availableQuantity})">-</button>
+                                <span>${currentQty}</span>
+                                <button class="qty-btn" onclick="updateCart('${item.id}', '${item.itemName}', 1, ${item.availableQuantity})">+</button>
+                            </div>
+                        </td>
+                    </tr>`;
+            });
+        }
+
+        window.updateCart = function(id, name, change, max) {
+            if (!cart[id]) cart[id] = { itemName: name, qty: 0 };
+            const newQty = cart[id].qty + change;
+            
+            if (newQty >= 0 && newQty <= max) {
+                cart[id].qty = newQty;
+                if (cart[id].qty === 0) delete cart[id];
+                renderInventory();
+            } else if (newQty > max) {
+                alert("Cannot exceed available stock.");
+            }
+        };
+
+        const modal = document.getElementById('booking-modal');
+        document.getElementById('open-modal-btn').addEventListener('click', () => {
+            if (Object.keys(cart).length === 0) return alert("Please select at least one item.");
+            let summaryHTML = "<strong>Selected Items:</strong><br>";
+            Object.values(cart).forEach(item => summaryHTML += `- ${item.itemName} (Qty: ${item.qty})<br>`);
+            document.getElementById('cart-summary-display').innerHTML = summaryHTML;
+            modal.style.display = 'flex';
+        });
+        document.getElementById('close-modal-btn').addEventListener('click', () => modal.style.display = 'none');
+
+        document.getElementById('booking-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = e.target.querySelector('button');
+            btn.innerText = "Submitting...";
+            
+            const selectedItemsArray = Object.keys(cart).map(id => ({ id: id, itemName: cart[id].itemName, qty: cart[id].qty }));
+
+            try {
+                await addDoc(collection(db, "bookings"), {
+                    studentName: document.getElementById('studentName').value,
+                    matricNumber: document.getElementById('matricNumber').value,
+                    phone: document.getElementById('phone').value,
+                    items: selectedItemsArray,
+                    borrowDate: document.getElementById('borrowDate').value,
+                    course: document.getElementById('course').value,
+                    courseLecturer: document.getElementById('lecturer').value,
+                    status: "Pending",
+                    collectionDate: "",
+                    remarks: "",
+                    requestDate: new Date().toISOString()
+                });
+                alert("Booking submitted successfully! Check the records table.");
+                cart = {}; 
+                modal.style.display = 'none';
+                e.target.reset();
+                renderInventory();
+            } catch (error) { alert("Error: " + error.message); }
+            btn.innerText = "Confirm Submission";
+        });
+
+        let allBookings = [];
+        function loadBookings() {
+            onSnapshot(collection(db, "bookings"), (snapshot) => {
+                allBookings = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                allBookings.sort((a, b) => new Date(b.requestDate) - new Date(a.requestDate));
+                renderBookings();
+            });
+        }
+
+        function renderBookings() {
+            const table = document.getElementById('bookings-table');
+            const search = document.getElementById('search-bookings').value.toLowerCase();
+            table.innerHTML = '';
+            
+            // Get today's local date in YYYY-MM-DD format
+            const today = new Date();
+            const todayString = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+            
+            const filteredBookings = allBookings.filter(b => {
+                // 1. Search matching
+                const matchesSearch = b.studentName.toLowerCase().includes(search);
+                
+                // 2. Hide "Returned" items if the returnDate is prior to today
+                let isVisible = true;
+                if (b.status === "Returned" && b.returnDate) {
+                    if (b.returnDate < todayString) {
+                        isVisible = false;
+                    }
+                }
+                
+                return matchesSearch && isVisible;
+            });
+
+            if (filteredBookings.length === 0) {
+                table.innerHTML = `<tr><td colspan="4" style="text-align:center;">No active records found.</td></tr>`;
+                return;
+            }
+
+            filteredBookings.forEach(b => {
+                let itemsList = b.items.map(i => `${i.itemName} (x${i.qty})`).join("<br>");
+                let badgeClass = b.status.split(" ")[0].toLowerCase();
+                let details = `
+                    <span class="badge bg-${badgeClass}">${b.status}</span>
+                    ${b.collectionDate ? `<br><small>Collect: ${b.collectionDate}</small>` : ''}
+                    ${b.status === "Returned" && b.returnDate ? `<br><small>Returned on: ${b.returnDate}</small>` : ''}
+                    ${b.remarks ? `<br><small>Note: ${b.remarks}</small>` : ''}
+                `;
+
+                table.innerHTML += `
+                    <tr>
+                        <td>${b.studentName}<br><small>${b.matricNumber}</small></td>
+                        <td><small>${itemsList}</small></td>
+                        <td>${b.borrowDate}</td>
+                        <td>${details}</td>
+                    </tr>`;
+            });
+        }
+
+        document.getElementById('search-inventory').addEventListener('input', renderInventory);
+        document.getElementById('search-bookings').addEventListener('input', renderBookings);
+
+        loadLabInfo();
+        loadInventory();
+        loadBookings();
+    </script>
+</body>
+</html>
